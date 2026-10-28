@@ -56,9 +56,49 @@ pub fn ensure_patched_lsp_src(src_path: &str) -> Result<bool, String> {
     Ok(true)
 }
 
+/// When patching the workspace copy fails (common with pnpm symlinks under WASI), use the
+/// extension-managed install instead so the v2 Zed compatibility patch still applies.
+pub fn server_bin_after_patch_attempt(
+    local_bin: &str,
+    patch_local: Result<bool, String>,
+    bundled_bin: &str,
+) -> Result<String, String> {
+    match patch_local {
+        Ok(_) => Ok(local_bin.to_string()),
+        Err(_) => Ok(bundled_bin.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn falls_back_to_bundled_when_local_patch_read_fails() {
+        let local = "/project/node_modules/@x18n/lsp/bin.mjs";
+        let bundled = "/extensions/work/x18n-language-server/node_modules/@x18n/lsp/bin.mjs";
+        let chosen = server_bin_after_patch_attempt(
+            local,
+            Err("failed to read: No such file".into()),
+            bundled,
+        )
+        .unwrap();
+        assert_eq!(chosen, bundled);
+    }
+
+    #[test]
+    fn keeps_local_when_patch_succeeds_or_is_already_applied() {
+        let local = "/project/node_modules/@x18n/lsp/bin.mjs";
+        let bundled = "/extensions/work/node_modules/@x18n/lsp/bin.mjs";
+        assert_eq!(
+            server_bin_after_patch_attempt(local, Ok(true), bundled).unwrap(),
+            local
+        );
+        assert_eq!(
+            server_bin_after_patch_attempt(local, Ok(false), bundled).unwrap(),
+            local
+        );
+    }
 
     #[test]
     fn patches_pristine_initialize_block() {

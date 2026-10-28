@@ -3,7 +3,9 @@ mod server_resolve;
 
 use std::{env, fs};
 
-use lsp_patch::{ensure_patched_lsp_src, lsp_src_path_from_bin};
+use lsp_patch::{
+    ensure_patched_lsp_src, lsp_src_path_from_bin, server_bin_after_patch_attempt,
+};
 use server_resolve::{
     build_initialization_options, is_version_outdated, join_path, local_server_path_from_root,
     merge_initialization_options, package_json_lists_x18n_lsp, pinned_server_version,
@@ -95,14 +97,35 @@ impl X18nExtension {
         Ok(())
     }
 
-    fn prepare_server_bin(bin_path: &str) -> Result<()> {
-        let src = lsp_src_path_from_bin(bin_path);
-        ensure_patched_lsp_src(&src).map_err(|err| err)?;
-        Ok(())
+    fn prepare_bundled_bin(
+        &mut self,
+        language_server_id: &zed::LanguageServerId,
+        version: &str,
+    ) -> Result<String> {
+        self.ensure_bundled_server(language_server_id, version)?;
+        let bundled = self.bundled_server_path();
+        ensure_patched_lsp_src(&lsp_src_path_from_bin(&bundled))?;
+        Ok(bundled)
     }
 
-    fn node_command_for_script(script: String) -> Result<zed::Command> {
-        Self::prepare_server_bin(&script)?;
+    /// Patch when possible, then start Node on `bin.mjs`. Falls back to the extension-managed
+    /// copy when the workspace install cannot be read (e.g. pnpm symlinks under WASI).
+    fn command_for_patched_server(
+        &mut self,
+        language_server_id: &zed::LanguageServerId,
+        _worktree: &zed::Worktree,
+        preferred_bin: String,
+        version: &str,
+    ) -> Result<zed::Command> {
+        let patch_local =
+            ensure_patched_lsp_src(&lsp_src_path_from_bin(&preferred_bin));
+        let script = match patch_local {
+            Ok(_) => preferred_bin,
+            Err(err) => {
+                let bundled = self.prepare_bundled_bin(language_server_id, version)?;
+                server_bin_after_patch_attempt(&preferred_bin, Err(err), &bundled)?
+            }
+        };
         Ok(zed::Command {
             command: zed::node_binary_path()?,
             args: vec![script, "--stdio".into()],
@@ -152,6 +175,7 @@ impl zed::Extension for X18nExtension {
     ) -> Result<zed::Command> {
         let lsp_settings = LspSettings::for_worktree(language_server_id.as_ref(), worktree)?;
         let user_settings = lsp_settings.settings.clone().unwrap_or(Value::Null);
+        let version = pinned_server_version(&user_settings);
 
         if let Some(binary) = lsp_settings.binary {
             return Ok(zed::Command {
@@ -165,27 +189,31 @@ impl zed::Extension for X18nExtension {
 
         if use_local_server(&user_settings) && self.worktree_has_local_server(worktree) {
             let script = local_server_path_from_root(worktree.root_path().as_str());
-            return Self::node_command_for_script(script);
+            return self.command_for_patched_server(
+                language_server_id,
+                worktree,
+                script,
+                version,
+            );
         }
 
         if use_npx_fallback(&user_settings) {
             if let Some(npx) = worktree.which("npx") {
-                let version = pinned_server_version(&user_settings);
+                let npx_bin = format!("{PACKAGE_NAME}@{version}");
                 return Ok(zed::Command {
                     command: npx,
-                    args: vec![
-                        "-y".into(),
-                        format!("{PACKAGE_NAME}@{version}"),
-                        "--stdio".into(),
-                    ],
+                    args: vec!["-y".into(), npx_bin, "--stdio".into()],
                     env: Default::default(),
                 });
             }
         }
 
-        let version = pinned_server_version(&user_settings);
-        self.ensure_bundled_server(language_server_id, version)?;
-        Self::node_command_for_script(self.bundled_server_path())
+        let bundled = self.prepare_bundled_bin(language_server_id, version)?;
+        Ok(zed::Command {
+            command: zed::node_binary_path()?,
+            args: vec![bundled, "--stdio".into()],
+            env: Default::default(),
+        })
     }
 }
 

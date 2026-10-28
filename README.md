@@ -50,7 +50,7 @@ Restart the x18n language server in Zed. The extension prefers this copy over th
 
 Without a workspace install, the extension installs `@x18n/lsp` on first use (default version **0.1.1**, overridable via `serverVersion`).
 
-Before starting the server, the extension applies a **small compatibility patch** to `@x18n/lsp` so Zed’s empty `workspaceFolders: []` initialize payload still resolves the open folder (see [docs/workspace-folders.md](./docs/workspace-folders.md)). The extension also passes `worktreeRoot` in initialization options. If you use a custom `lsp.x18n.binary` override, that path bypasses this patch unless you run `node scripts/run-patch-x18n-lsp.mjs` on your `@x18n/lsp` install.
+Before starting the server, the extension applies a **small compatibility patch** to `@x18n/lsp` so Zed’s empty `workspaceFolders: []` initialize payload still resolves the open folder (see [docs/workspace-folders.md](./docs/workspace-folders.md)). The extension also passes `worktreeRoot` in initialization options. With **`useLocalServer`**, the patch targets the workspace copy first; if the extension cannot read that file (common with **pnpm** symlink layouts under the WASM sandbox), it **falls back** to the extension-managed install (already patched) instead of failing to start. If you use a custom `lsp.x18n.binary` override, that path bypasses this patch unless you run `node scripts/run-patch-x18n-lsp.mjs` on your `@x18n/lsp` install.
 
 An **`x18n.config.*` file is not required** for the server to start; i18n-ally-style `.vscode/settings.json` layouts (as read by `x18n doctor`) are enough once the workspace root is visible to the server.
 

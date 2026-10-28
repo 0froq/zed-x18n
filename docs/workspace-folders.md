@@ -42,6 +42,8 @@ We apply a **small, documented compatibility patch** to `@x18n/lsp`’s `dist/sr
 1. Treat empty `workspaceFolders` like missing folders.
 2. When recovering, prefer **`initializationOptions.worktreeRoot`** (set from Zed `worktree.root_path()`) **before** `rootUri`. Zed may send a misleading `rootUri` (for example `~/.config/zed`) while the edited project lives elsewhere.
 
+If **`useLocalServer`** points at a workspace install but the extension **cannot read** `dist/src.mjs` (typical with **pnpm** symlinks under the WASM filesystem), startup **falls back** to the extension-managed copy (patch applied there) instead of failing with a red language server.
+
 The same patch is available manually:
 
 ```bash
