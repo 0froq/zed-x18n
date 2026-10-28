@@ -1,12 +1,14 @@
+mod lsp_patch;
 mod server_resolve;
 
 use std::{env, fs};
 
+use lsp_patch::{ensure_patched_lsp_src, lsp_src_path_from_bin};
 use server_resolve::{
     build_initialization_options, is_version_outdated, join_path, local_server_path_from_root,
     merge_initialization_options, package_json_lists_x18n_lsp, pinned_server_version,
-    should_install_npm, use_local_server, use_npx_fallback, LOCAL_PACKAGE_JSON_REL,
-    LOCAL_SERVER_REL, PACKAGE_NAME,
+    should_install_npm, use_local_server, use_npx_fallback, with_worktree_root,
+    LOCAL_PACKAGE_JSON_REL, LOCAL_SERVER_REL, PACKAGE_NAME,
 };
 use zed_extension_api::{self as zed, settings::LspSettings, Result};
 use zed_extension_api::serde_json::Value;
@@ -93,7 +95,14 @@ impl X18nExtension {
         Ok(())
     }
 
+    fn prepare_server_bin(bin_path: &str) -> Result<()> {
+        let src = lsp_src_path_from_bin(bin_path);
+        ensure_patched_lsp_src(&src).map_err(|err| err)?;
+        Ok(())
+    }
+
     fn node_command_for_script(script: String) -> Result<zed::Command> {
+        Self::prepare_server_bin(&script)?;
         Ok(zed::Command {
             command: zed::node_binary_path()?,
             args: vec![script, "--stdio".into()],
@@ -116,9 +125,13 @@ impl zed::Extension for X18nExtension {
     ) -> Result<Option<Value>> {
         let lsp_settings = LspSettings::for_worktree(language_server_id.as_ref(), worktree)?;
         let user_settings = lsp_settings.settings.unwrap_or(Value::Null);
-        Ok(Some(merge_initialization_options(
+        let options = merge_initialization_options(
             &user_settings,
             lsp_settings.initialization_options,
+        );
+        Ok(Some(with_worktree_root(
+            options,
+            worktree.root_path().as_str(),
         )))
     }
 

@@ -88,6 +88,22 @@ pub fn build_initialization_options(settings: &Value) -> Value {
     Value::Object(map)
 }
 
+pub fn with_worktree_root(options: Value, worktree_root: &str) -> Value {
+    let Value::Object(mut map) = options else {
+        let mut map = Map::new();
+        map.insert(
+            "worktreeRoot".into(),
+            Value::String(worktree_root.to_string()),
+        );
+        return Value::Object(map);
+    };
+    map.insert(
+        "worktreeRoot".into(),
+        Value::String(worktree_root.to_string()),
+    );
+    Value::Object(map)
+}
+
 pub fn merge_initialization_options(
     from_settings: &Value,
     explicit: Option<Value>,

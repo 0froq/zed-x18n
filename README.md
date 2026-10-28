@@ -50,6 +50,10 @@ Restart the x18n language server in Zed. The extension prefers this copy over th
 
 Without a workspace install, the extension installs `@x18n/lsp` on first use (default version **0.1.1**, overridable via `serverVersion`).
 
+Before starting the server, the extension applies a **small compatibility patch** to `@x18n/lsp` so Zed’s empty `workspaceFolders: []` initialize payload still resolves the open folder (see [docs/workspace-folders.md](./docs/workspace-folders.md)). The extension also passes `worktreeRoot` in initialization options. If you use a custom `lsp.x18n.binary` override, that path bypasses this patch unless you run `node scripts/run-patch-x18n-lsp.mjs` on your `@x18n/lsp` install.
+
+An **`x18n.config.*` file is not required** for the server to start; i18n-ally-style `.vscode/settings.json` layouts (as read by `x18n doctor`) are enough once the workspace root is visible to the server.
+
 ## Zed settings
 
 Configure under `lsp.x18n` in user or project `.zed/settings.json`:
@@ -91,13 +95,13 @@ These map to `@x18n/lsp` **initialization options** (see [VS Code surface docs](
 
 ## Supported languages
 
-The server is registered for JavaScript, JSX, TypeScript, TSX, Vue.js, JSON, JSONC, YAML, HTML, Svelte, and Astro (with VS Code-compatible LSP language IDs). The upstream server activates on workspace files broadly once an `x18n.config.*` or project layout is detected.
+The server is registered for JavaScript, JSX, TypeScript, TSX, Vue.js, JSON, JSONC, YAML, HTML, Svelte, and Astro (with VS Code-compatible LSP language IDs). The upstream server indexes the workspace once it knows the workspace folder and finds locale/config data (including zero-config / i18n-ally-derived layouts).
 
 ## Development
 
 ```bash
-cargo test          # Rust unit tests (path resolution, settings mapping)
-npm install && npm test   # stdio smoke test against @x18n/lsp
+cargo test          # Rust unit tests (path resolution, LSP patch, settings mapping)
+npm install && npm test   # patch + stdio smoke tests against @x18n/lsp
 cargo build --release --target wasm32-wasip2
 ```
 
@@ -105,8 +109,8 @@ Architecture reference: [packages/vscode](https://github.com/x18n-dev/x18n/tree/
 
 ## Sample project smoke test
 
-1. Open a repo with `x18n.config.json` and locale files.
-2. Install `@x18n/lsp` locally (see above).
+1. Open a repo with i18n locales (with or without `x18n.config.*` — e.g. lig + `.vscode/settings.json` i18n-ally paths).
+2. Install `@x18n/lsp` locally or rely on the extension download (see above).
 3. Open a Vue/TS file using `t('key')`.
 4. Confirm diagnostics, hover, go-to-definition, rename, and inlay hints.
 

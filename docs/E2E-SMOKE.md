@@ -7,7 +7,9 @@ Use this after installing the dev extension. It mirrors what the VS Code extensi
 - [ ] Node.js **22+** (`node -v`)
 - [ ] Rust **stable** with `wasm32-wasip2` (`rustup target add wasm32-wasip2`)
 - [ ] Zed with **Install Dev Extension** (Extensions → Install Dev Extension → this repo root)
-- [ ] Sample project with `x18n.config.json` (or `.yml`) and locale files
+- [ ] Sample project with locale files (with or without `x18n.config.*`; i18n-ally / `.vscode/settings.json` layouts are fine)
+
+See [workspace-folders.md](./workspace-folders.md) if Zed log ever showed `No workspace folder is open.` — the dev extension patches `@x18n/lsp` automatically for servers it starts.
 
 ## Install server for local debug
 
