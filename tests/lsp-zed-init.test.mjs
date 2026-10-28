@@ -69,25 +69,24 @@ function readChunk(stream) {
   })
 }
 
-test('patched @x18n/lsp accepts Zed-style empty workspaceFolders', async () => {
+test('patched server uses worktreeRoot over Zed config rootUri', async () => {
   const original = readFileSync(SRC)
-  if (!original.includes('_x18nMapped')) {
-    assert.equal(patchFile(SRC), true)
-  }
+  assert.equal(patchFile(SRC), true, 'expected v2 patch to apply or upgrade')
 
-  const root = await mkdtemp(join(tmpdir(), 'x18n-zed-root-'))
+  const lig = await mkdtemp(join(tmpdir(), 'x18n-lig-'))
+  const zedConfig = await mkdtemp(join(tmpdir(), 'x18n-zed-config-'))
   const child = spawn(process.execPath, [BIN, '--stdio'], { stdio: ['pipe', 'pipe', 'inherit'] })
   child.stdout.resume()
   try {
-    await mkdir(join(root, 'locales'), { recursive: true })
+    await mkdir(join(lig, 'locales'), { recursive: true })
     await writeFile(
-      join(root, 'x18n.config.json'),
+      join(lig, 'x18n.config.json'),
       JSON.stringify({
         sourceLocale: 'en',
         locales: [{ code: 'en', files: ['locales/en.json'] }],
       }),
     )
-    await writeFile(join(root, 'locales/en.json'), JSON.stringify({ hello: 'Hello' }))
+    await writeFile(join(lig, 'locales/en.json'), JSON.stringify({ hello: 'Hello' }))
 
     writeMessage(child.stdin, {
       jsonrpc: '2.0',
@@ -95,18 +94,24 @@ test('patched @x18n/lsp accepts Zed-style empty workspaceFolders', async () => {
       method: 'initialize',
       params: {
         processId: null,
-        rootUri: `file://${root}`,
+        rootUri: `file://${zedConfig}`,
         workspaceFolders: [],
         capabilities: {},
-        initializationOptions: { worktreeRoot: root, showFlags: false },
+        initializationOptions: { worktreeRoot: lig, showFlags: false },
       },
     })
 
-    const init = await readResponse(child.stdout, 1)
-    assert.equal(init.serverInfo.name, 'x18n')
+    await readResponse(child.stdout, 1)
+    writeMessage(child.stdin, { jsonrpc: '2.0', method: 'initialized', params: {} })
+    writeMessage(child.stdin, { jsonrpc: '2.0', id: 2, method: 'x18n/explain', params: null })
+
+    const explain = await readResponse(child.stdout, 2)
+    assert.match(String(explain), new RegExp(lig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    assert.doesNotMatch(String(explain), new RegExp(zedConfig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   } finally {
     child.kill()
     writeFileSync(SRC, original)
-    await rm(root, { recursive: true, force: true })
+    await rm(lig, { recursive: true, force: true })
+    await rm(zedConfig, { recursive: true, force: true })
   }
 })

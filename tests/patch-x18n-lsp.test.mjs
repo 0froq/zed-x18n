@@ -5,23 +5,23 @@ import { tmpdir } from 'node:os'
 import test from 'node:test'
 import { patchFile, patchX18nLspSrc } from '../scripts/patch-x18n-lsp-for-zed.mjs'
 
-const INITIALIZE_LINE =
-  'const folders = params.workspaceFolders?.map((folder) => fileURLToPath(folder.uri)) ?? (params.rootUri ? [fileURLToPath(params.rootUri)] : []);'
+const INITIALIZE_BLOCK_ORIGINAL = `\t\tconst folders = params.workspaceFolders?.map((folder) => fileURLToPath(folder.uri)) ?? (params.rootUri ? [fileURLToPath(params.rootUri)] : []);
+\t\tthis.folders = folders;
+\t\tthis.watchRegistration = params.capabilities.workspace?.didChangeWatchedFiles?.dynamicRegistration === true;
+\t\tconst settings = params.initializationOptions;`
 
-test('patch replaces empty workspaceFolders handling', () => {
-  const input = `async initialize(params) {\n\t\t${INITIALIZE_LINE}\n\t\tconst settings = params.initializationOptions;\n\t\tif (typeof settings?.showFlags === "boolean") this.settings.showFlags = settings.showFlags;\n\t}`
+test('v2 patch replaces pristine initialize block', () => {
+  const input = `async initialize(params) {\n${INITIALIZE_BLOCK_ORIGINAL}\n}`
   const out = patchX18nLspSrc(input)
-  assert.ok(out?.includes('_x18nMapped?.length'))
-  assert.ok(out?.includes('settings?.worktreeRoot'))
+  assert.ok(out?.includes('settings.worktreeRoot.trim()'))
 })
 
 test('patch applies to a copied dist fragment', () => {
-  const input = `async initialize(params) {\n\t\t${INITIALIZE_LINE}\n\t\tconst settings = params.initializationOptions;\n\t\tif (typeof settings?.showFlags === "boolean") this.settings.showFlags = settings.showFlags;\n\t}`
   const dir = mkdtempSync(join(tmpdir(), 'x18n-patch-'))
   const copy = join(dir, 'src.mjs')
-  writeFileSync(copy, input)
+  writeFileSync(copy, `async initialize(params) {\n${INITIALIZE_BLOCK_ORIGINAL}\n}`)
   assert.equal(patchFile(copy), true)
   const patched = readFileSync(copy, 'utf8')
-  assert.ok(patched.includes('_x18nMapped?.length'))
+  assert.ok(patched.includes('settings.worktreeRoot.trim()'))
   rmSync(dir, { recursive: true, force: true })
 })

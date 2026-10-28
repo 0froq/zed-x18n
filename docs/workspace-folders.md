@@ -39,8 +39,8 @@ There is no Zed extension API to override `initialize.workspaceFolders`.
 
 We apply a **small, documented compatibility patch** to `@x18n/lsp`’s `dist/src.mjs` when we start a server we control (extension-managed npm install, or workspace `node_modules` if the patch can be written):
 
-1. Treat empty `workspaceFolders` like missing folders and fall back to `rootUri`.
-2. If folders are still empty, use `initializationOptions.worktreeRoot` (always set from `worktree.root_path()` by this extension).
+1. Treat empty `workspaceFolders` like missing folders.
+2. When recovering, prefer **`initializationOptions.worktreeRoot`** (set from Zed `worktree.root_path()`) **before** `rootUri`. Zed may send a misleading `rootUri` (for example `~/.config/zed`) while the edited project lives elsewhere.
 
 The same patch is available manually:
 
