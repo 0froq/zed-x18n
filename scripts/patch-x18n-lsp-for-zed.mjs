@@ -1,33 +1,23 @@
 import { readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const INITIALIZE_LINE =
-  'const folders = params.workspaceFolders?.map((folder) => fileURLToPath(folder.uri)) ?? (params.rootUri ? [fileURLToPath(params.rootUri)] : []);'
+const blocksDir = join(dirname(fileURLToPath(import.meta.url)), 'lsp-patch-blocks')
 
-const INITIALIZE_BLOCK_ORIGINAL = `\t\t${INITIALIZE_LINE}
-\t\tthis.folders = folders;
-\t\tthis.watchRegistration = params.capabilities.workspace?.didChangeWatchedFiles?.dynamicRegistration === true;
-\t\tconst settings = params.initializationOptions;`
+function readBlock(name) {
+  return readFileSync(join(blocksDir, name), 'utf8')
+}
 
-const INITIALIZE_PATCHED_V1 =
-  'const _x18nMapped = params.workspaceFolders?.map((folder) => fileURLToPath(folder.uri)); const folders = _x18nMapped?.length ? _x18nMapped : (params.rootUri ? [fileURLToPath(params.rootUri)] : []);'
+export const INITIALIZE_BLOCK_ORIGINAL = readBlock('initialize-original.txt')
+export const INITIALIZE_BLOCK_V1 = readBlock('initialize-v1.txt')
+export const INITIALIZE_BLOCK_V2 = readBlock('initialize-v2.txt')
 
-const INITIALIZE_BLOCK_V1 = `\t\t${INITIALIZE_PATCHED_V1}
-\t\tthis.folders = folders;
-\t\tthis.watchRegistration = params.capabilities.workspace?.didChangeWatchedFiles?.dynamicRegistration === true;
-\t\tconst settings = params.initializationOptions;`
-
-export const INITIALIZE_BLOCK_V2 = `\t\tconst _x18nMapped = params.workspaceFolders?.map((folder) => fileURLToPath(folder.uri));
-\t\tconst settings = params.initializationOptions;
-\t\tlet folders = _x18nMapped?.length ? _x18nMapped : [];
-\t\tif (folders.length === 0 && typeof settings?.worktreeRoot === "string" && settings.worktreeRoot.trim()) folders = [settings.worktreeRoot];
-\t\telse if (folders.length === 0 && params.rootUri) folders = [fileURLToPath(params.rootUri)];
-\t\tthis.folders = folders;
-\t\tthis.watchRegistration = params.capabilities.workspace?.didChangeWatchedFiles?.dynamicRegistration === true;`
-
+const WORKTREE_ROOT_MARKER_V1 = readBlock('worktree-root-marker-v1.txt')
 const PATCH_V2_MARKER = 'settings.worktreeRoot.trim()'
 
-const WORKTREE_ROOT_MARKER_V1 =
-  'if (this.folders.length === 0 && typeof settings?.worktreeRoot === "string") this.folders = [settings.worktreeRoot];'
+export function isV2Patched(content) {
+  return content.includes(PATCH_V2_MARKER) && content.includes('let folders = _x18nMapped')
+}
 
 /** Same folder resolution as the v2 compatibility patch (for tests). */
 export function resolveZedWorkspaceFolders(params, fileURLToPath) {
@@ -43,7 +33,7 @@ export function resolveZedWorkspaceFolders(params, fileURLToPath) {
 }
 
 export function patchX18nLspSrc(content) {
-  if (content.includes(PATCH_V2_MARKER) && content.includes('let folders = _x18nMapped')) {
+  if (isV2Patched(content)) {
     return null
   }
 

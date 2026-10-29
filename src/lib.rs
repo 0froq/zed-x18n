@@ -3,17 +3,15 @@ mod server_resolve;
 
 use std::{env, fs};
 
-use lsp_patch::{
-    ensure_patched_lsp_src, lsp_src_path_from_bin, server_bin_after_patch_attempt,
-};
+use lsp_patch::{ensure_patched_lsp_src, lsp_src_path_from_bin, server_bin_after_patch_attempt};
 use server_resolve::{
-    build_initialization_options, is_version_outdated, join_path, local_server_path_from_root,
+    build_initialization_options, choose_server_source, join_path, local_server_path_from_root,
     merge_initialization_options, package_json_lists_x18n_lsp, pinned_server_version,
-    should_install_npm, use_local_server, use_npx_fallback, with_worktree_root,
+    should_install_npm, use_local_server, use_npx_fallback, with_worktree_root, ServerSource,
     LOCAL_PACKAGE_JSON_REL, LOCAL_SERVER_REL, PACKAGE_NAME,
 };
-use zed_extension_api::{self as zed, settings::LspSettings, Result};
 use zed_extension_api::serde_json::Value;
+use zed_extension_api::{self as zed, settings::LspSettings, Result};
 
 struct X18nExtension {
     bundled_server_ready: bool,
@@ -85,12 +83,6 @@ impl X18nExtension {
                     }
                 }
             }
-        } else if installed
-            .as_deref()
-            .is_some_and(|installed| is_version_outdated(installed, target))
-            && self.bundled_server_exists()
-        {
-            // Keep the cached server when offline.
         }
 
         self.bundled_server_ready = true;
@@ -108,29 +100,31 @@ impl X18nExtension {
         Ok(bundled)
     }
 
-    /// Patch when possible, then start Node on `bin.mjs`. Falls back to the extension-managed
-    /// copy when the workspace install cannot be read (e.g. pnpm symlinks under WASI).
-    fn command_for_patched_server(
-        &mut self,
-        language_server_id: &zed::LanguageServerId,
-        _worktree: &zed::Worktree,
-        preferred_bin: String,
-        version: &str,
-    ) -> Result<zed::Command> {
-        let patch_local =
-            ensure_patched_lsp_src(&lsp_src_path_from_bin(&preferred_bin));
-        let script = match patch_local {
-            Ok(_) => preferred_bin,
-            Err(err) => {
-                let bundled = self.prepare_bundled_bin(language_server_id, version)?;
-                server_bin_after_patch_attempt(&preferred_bin, Err(err), &bundled)?
-            }
-        };
+    fn node_stdio_command(script: String) -> Result<zed::Command> {
         Ok(zed::Command {
             command: zed::node_binary_path()?,
             args: vec![script, "--stdio".into()],
             env: Default::default(),
         })
+    }
+
+    /// Patch when possible, then start Node on `bin.mjs`. Falls back to the extension-managed
+    /// copy when the workspace install cannot be read (e.g. pnpm symlinks under WASI).
+    fn command_for_patched_server(
+        &mut self,
+        language_server_id: &zed::LanguageServerId,
+        preferred_bin: String,
+        version: &str,
+    ) -> Result<zed::Command> {
+        let patch_local = ensure_patched_lsp_src(&lsp_src_path_from_bin(&preferred_bin));
+        let script = match patch_local {
+            Ok(_) => preferred_bin,
+            Err(err) => {
+                let bundled = self.prepare_bundled_bin(language_server_id, version)?;
+                server_bin_after_patch_attempt(&preferred_bin, Err(err), &bundled)
+            }
+        };
+        Self::node_stdio_command(script)
     }
 }
 
@@ -148,10 +142,8 @@ impl zed::Extension for X18nExtension {
     ) -> Result<Option<Value>> {
         let lsp_settings = LspSettings::for_worktree(language_server_id.as_ref(), worktree)?;
         let user_settings = lsp_settings.settings.unwrap_or(Value::Null);
-        let options = merge_initialization_options(
-            &user_settings,
-            lsp_settings.initialization_options,
-        );
+        let options =
+            merge_initialization_options(&user_settings, lsp_settings.initialization_options);
         Ok(Some(with_worktree_root(
             options,
             worktree.root_path().as_str(),
@@ -176,44 +168,46 @@ impl zed::Extension for X18nExtension {
         let lsp_settings = LspSettings::for_worktree(language_server_id.as_ref(), worktree)?;
         let user_settings = lsp_settings.settings.clone().unwrap_or(Value::Null);
         let version = pinned_server_version(&user_settings);
+        let npx_path = if use_npx_fallback(&user_settings) {
+            worktree.which("npx")
+        } else {
+            None
+        };
 
-        if let Some(binary) = lsp_settings.binary {
-            return Ok(zed::Command {
-                command: binary.path.unwrap_or_else(|| {
-                    zed::node_binary_path().unwrap_or_else(|_| "node".into())
-                }),
-                args: binary.arguments.unwrap_or_default(),
-                env: Default::default(),
-            });
-        }
-
-        if use_local_server(&user_settings) && self.worktree_has_local_server(worktree) {
-            let script = local_server_path_from_root(worktree.root_path().as_str());
-            return self.command_for_patched_server(
-                language_server_id,
-                worktree,
-                script,
-                version,
-            );
-        }
-
-        if use_npx_fallback(&user_settings) {
-            if let Some(npx) = worktree.which("npx") {
+        match choose_server_source(
+            lsp_settings.binary.is_some(),
+            use_local_server(&user_settings),
+            self.worktree_has_local_server(worktree),
+            npx_path.is_some(),
+        ) {
+            ServerSource::CustomBinary => {
+                let binary = lsp_settings.binary.ok_or("missing lsp.x18n.binary")?;
+                Ok(zed::Command {
+                    command: binary.path.unwrap_or_else(|| {
+                        zed::node_binary_path().unwrap_or_else(|_| "node".into())
+                    }),
+                    args: binary.arguments.unwrap_or_default(),
+                    env: Default::default(),
+                })
+            }
+            ServerSource::LocalWorkspace => {
+                let script = local_server_path_from_root(worktree.root_path().as_str());
+                self.command_for_patched_server(language_server_id, script, version)
+            }
+            ServerSource::Npx => {
+                let npx = npx_path.ok_or("npx not found on PATH")?;
                 let npx_bin = format!("{PACKAGE_NAME}@{version}");
-                return Ok(zed::Command {
+                Ok(zed::Command {
                     command: npx,
                     args: vec!["-y".into(), npx_bin, "--stdio".into()],
                     env: Default::default(),
-                });
+                })
+            }
+            ServerSource::Bundled => {
+                let bundled = self.prepare_bundled_bin(language_server_id, version)?;
+                Self::node_stdio_command(bundled)
             }
         }
-
-        let bundled = self.prepare_bundled_bin(language_server_id, version)?;
-        Ok(zed::Command {
-            command: zed::node_binary_path()?,
-            args: vec![bundled, "--stdio".into()],
-            env: Default::default(),
-        })
     }
 }
 

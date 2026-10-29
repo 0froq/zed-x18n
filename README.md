@@ -1,62 +1,52 @@
 # x18n for Zed
 
-Community Zed extension that wraps the official [`@x18n/lsp`](https://www.npmjs.com/package/@x18n/lsp) language server from [x18n-dev/x18n](https://github.com/x18n-dev/x18n). i18n logic lives in the server; this repo only wires Zed to spawn it and forwards LSP features (hover, definition, references, rename, completion, diagnostics, code actions, inlay hints, code lens).
+Community Zed extension that starts [`@x18n/lsp`](https://www.npmjs.com/package/@x18n/lsp) from [x18n-dev/x18n](https://github.com/x18n-dev/x18n). All i18n logic lives in the language server. This repo only spawns it and maps Zed settings to LSP initialization options (hover, definition, usages, rename, completion, diagnostics, code actions, inlay hints, code lens).
 
-This is a **prototype** maintained in [0froq/zed-x18n](https://github.com/0froq/zed-x18n). If the x18n team wants an official Zed extension, this repo is offered for upstream adoption.
+Maintained in [0froq/zed-x18n](https://github.com/0froq/zed-x18n). Hosting inside the x18n monorepo is not decided.
 
 License: [MIT](./LICENSE)
 
 ## Prerequisites
 
-- [Zed](https://zed.dev/) (recent build with extension API 0.7 / `wasm32-wasip2` extensions)
-- **Node.js 22+** (required by `@x18n/lsp`)
-- **Rust stable** with the `wasm32-wasip2` target (for building the extension WASM)
+- [Zed](https://zed.dev/) with extension API 0.7 (`wasm32-wasip2` extensions)
+- Node.js 22+ (required by `@x18n/lsp`)
+- Rust stable with the `wasm32-wasip2` target, to build from source
 
 ## Install as a dev extension
 
 1. Clone this repository.
 2. Build the WASM module:
 
-   ```bash
+   ```sh
    rustup target add wasm32-wasip2
    cargo build --release --target wasm32-wasip2
    ```
 
 3. In Zed: **Extensions → Install Dev Extension** and select this repo root.
-4. Grant extension capabilities when prompted (`npm:install` for `@x18n/lsp`, `process:exec` for Node).
+4. Grant `npm:install` (`@x18n/lsp`) and `process:exec` (Node) when prompted.
 
-See [docs/E2E-SMOKE.md](./docs/E2E-SMOKE.md) for a full local verification checklist.
+Setup and check commands: [CONTRIBUTING.md](./CONTRIBUTING.md). Editor checklist: [docs/e2e-smoke.md](./docs/e2e-smoke.md).
 
-## Language server binary resolution
+## Language server resolution
 
-Order (same idea as VS Code `x18n.useLocalServer`):
+Same idea as VS Code `x18n.useLocalServer`:
 
 | Priority | Source | When |
 | --- | --- | --- |
-| 1 | `lsp.x18n.binary` in settings | Manual override (path + args; include `--stdio` if you point at `bin.mjs`) |
-| 2 | `<worktree>/node_modules/@x18n/lsp/bin.mjs` | `useLocalServer` is true (default) and the package is installed |
-| 3 | `npx -y @x18n/lsp@<version> --stdio` | `useNpx: true` in `lsp.x18n.settings` |
-| 4 | Extension-managed npm install | Downloads `@x18n/lsp` into the extension work directory |
+| 1 | `lsp.x18n.binary` | Manual override (include `--stdio` if you point at `bin.mjs`) |
+| 2 | `<worktree>/node_modules/@x18n/lsp/bin.mjs` | `useLocalServer` is true (default) and `@x18n/lsp` is in the project |
+| 3 | `npx -y @x18n/lsp@<version> --stdio` | `useNpx: true` and `npx` is on `PATH` |
+| 4 | Extension-managed npm install | Downloads `@x18n/lsp` (default **0.1.3**) into the extension work directory |
 
-### Local debug (recommended)
+Recommended for local debug: `npm install -D @x18n/lsp@0.1.3` in the i18n project, then restart the language server.
 
-In your x18n project:
+Before start, the extension patches `@x18n/lsp` so Zed’s empty `workspaceFolders: []` still resolves the open folder, and it always sends `worktreeRoot` in initialization options. With `useLocalServer`, it patches the workspace copy first; if that file cannot be read (common with **pnpm** symlinks under the WASM sandbox), it starts the extension-managed copy instead of failing. A custom `lsp.x18n.binary` skips this patch unless you run `node scripts/run-patch-x18n-lsp.mjs` on that install. Details: [docs/workspace-folders.md](./docs/workspace-folders.md).
 
-```bash
-npm install -D @x18n/lsp@0.1.1
-```
-
-Restart the x18n language server in Zed. The extension prefers this copy over the downloaded one.
-
-Without a workspace install, the extension installs `@x18n/lsp` on first use (default version **0.1.1**, overridable via `serverVersion`).
-
-Before starting the server, the extension applies a **small compatibility patch** to `@x18n/lsp` so Zed’s empty `workspaceFolders: []` initialize payload still resolves the open folder (see [docs/workspace-folders.md](./docs/workspace-folders.md)). The extension also passes `worktreeRoot` in initialization options. With **`useLocalServer`**, the patch targets the workspace copy first; if the extension cannot read that file (common with **pnpm** symlink layouts under the WASM sandbox), it **falls back** to the extension-managed install (already patched) instead of failing to start. If you use a custom `lsp.x18n.binary` override, that path bypasses this patch unless you run `node scripts/run-patch-x18n-lsp.mjs` on your `@x18n/lsp` install.
-
-An **`x18n.config.*` file is not required** for the server to start; i18n-ally-style `.vscode/settings.json` layouts (as read by `x18n doctor`) are enough once the workspace root is visible to the server.
+An `x18n.config.*` file is not required for the server to start. i18n-ally-style `.vscode/settings.json` layouts are enough once the project root is visible to the server.
 
 ## Zed settings
 
-Configure under `lsp.x18n` in user or project `.zed/settings.json`:
+In user or project `.zed/settings.json`:
 
 ```json
 {
@@ -65,7 +55,7 @@ Configure under `lsp.x18n` in user or project `.zed/settings.json`:
       "settings": {
         "useLocalServer": true,
         "useNpx": false,
-        "serverVersion": "0.1.1",
+        "serverVersion": "0.1.3",
         "displayLocale": "",
         "annotationMaxLength": 40,
         "codeLens": false,
@@ -76,42 +66,16 @@ Configure under `lsp.x18n` in user or project `.zed/settings.json`:
 }
 ```
 
-These map to `@x18n/lsp` **initialization options** (see [VS Code surface docs](https://x18n.dev/raw/surfaces/vscode.md)).
+`displayLocale`, `annotationMaxLength`, `codeLens`, and `showFlags` are `@x18n/lsp` initialization options (see [VS Code surface docs](https://x18n.dev/raw/surfaces/vscode.md)). Empty `displayLocale` means the source locale.
 
-### Parity with VS Code
+### VS Code features this surface does not cover
 
-| VS Code | Zed (this extension) |
-| --- | --- |
-| LSP hover, definition, references, rename, completion, diagnostics, extract code actions | Supported via LSP |
-| Inlay hint annotations | Supported — enable **Inlay Hints** and **Show Other Hints** in Zed |
-| In-place annotations (`x18n.annotationInPlace`, theme colors) | **Not supported** — VS Code uses buffer decorations; Zed has no equivalent yet |
-| Activity bar views (Keys, Progress, Reviews, …) | **Not supported** — no Zed panel API equivalent |
-| Webview UI (`x18n: Open UI`) | **Not supported** — use the x18n CLI or VS Code for the UI |
-| Review comment threads in editor | **Not supported** |
-| Status bar display locale picker | **Not supported** — set `displayLocale` in settings |
-| `x18n.enabled` toggle | Disable by removing `x18n` from `language_servers` for a language in Zed settings |
-| `x18n.trace.server` | Use Zed LSP trace settings if available |
-| Config JSON/YAML schema validation | Use Zed JSON/YAML language support or CLI |
+In-place annotations, activity bar views, the webview UI, review comment threads, and the status bar locale picker need VS Code APIs Zed does not have. Enable **Inlay Hints** and **Show Other Hints** in Zed for annotation text. Disable the server by removing `x18n` from `language_servers` for a language.
 
 ## Supported languages
 
-The server is registered for JavaScript, JSX, TypeScript, TSX, Vue.js, JSON, JSONC, YAML, HTML, Svelte, and Astro (with VS Code-compatible LSP language IDs). The upstream server indexes the workspace once it knows the workspace folder and finds locale/config data (including zero-config / i18n-ally-derived layouts).
+JavaScript, JSX, TypeScript, TSX, Vue.js, JSON, JSONC, YAML, HTML, Svelte, and Astro (VS Code-compatible language IDs). The server indexes once it knows the project folder and finds resources.
 
 ## Development
 
-```bash
-cargo test          # Rust unit tests (path resolution, LSP patch, settings mapping)
-npm install && npm test   # patch + stdio smoke tests against @x18n/lsp
-cargo build --release --target wasm32-wasip2
-```
-
-Architecture reference: [packages/vscode](https://github.com/x18n-dev/x18n/tree/main/packages/vscode) + [packages/lsp](https://github.com/x18n-dev/x18n/tree/main/packages/lsp). Zed wiring patterns inspired by [yizixu/zed-i18n-lens](https://github.com/yizixu/zed-i18n-lens) (different server — do not confuse).
-
-## Sample project smoke test
-
-1. Open a repo with i18n locales (with or without `x18n.config.*` — e.g. lig + `.vscode/settings.json` i18n-ally paths).
-2. Install `@x18n/lsp` locally or rely on the extension download (see above).
-3. Open a Vue/TS file using `t('key')`.
-4. Confirm diagnostics, hover, go-to-definition, rename, and inlay hints.
-
-Details: [docs/E2E-SMOKE.md](./docs/E2E-SMOKE.md).
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Upstream references: [packages/lsp](https://github.com/x18n-dev/x18n/tree/main/packages/lsp), [packages/vscode](https://github.com/x18n-dev/x18n/tree/main/packages/vscode). Zed wiring is similar to [yizixu/zed-i18n-lens](https://github.com/yizixu/zed-i18n-lens) (a different server).

@@ -1,18 +1,8 @@
 # Zed `workspaceFolders` and x18n
 
-## What we observed
+When `@x18n/lsp` logs `No workspace folder is open.` with a folder already open in Zed, `initialize` was sent with `workspaceFolders: []`. That is not the same as omitting `workspaceFolders`.
 
-When x18n in Zed logs:
-
-```text
-No locale files found in the workspace.
-
-No workspace folder is open.
-```
-
-the `@x18n/lsp` process received `workspaceFolders: []` during `initialize`. That is not the same as omitting `workspaceFolders`.
-
-In `@x18n/lsp` 0.1.1 (`dist/src.mjs`):
+In `@x18n/lsp` 0.1.x (`dist/src.mjs`):
 
 ```javascript
 const folders =
@@ -20,43 +10,41 @@ const folders =
   ?? (params.rootUri ? [fileURLToPath(params.rootUri)] : []);
 ```
 
-If Zed sends `workspaceFolders: []`, the optional chain yields `[]`, which is **not** `null`/`undefined`, so the `?? rootUri` fallback never runs.
+`[]` is not `null`/`undefined`, so the `?? rootUri` fallback never runs.
 
 ## What other Zed extensions do
 
-Extensions such as [biome-zed](https://github.com/biomejs/biome-zed) and [zed-i18n-lens](https://github.com/yizixu/zed-i18n-lens) only implement `language_server_command` (and settings). They do **not** rewrite LSP traffic or inject workspace folders. Zed’s client builds `initialize` in `LanguageServer::default_initialize_params` (`crates/lsp/src/lsp.rs`):
+[biome-zed](https://github.com/biomejs/biome-zed) and [zed-i18n-lens](https://github.com/yizixu/zed-i18n-lens) implement `language_server_command` (and settings). They do not rewrite LSP traffic. Zed builds `initialize` in `LanguageServer::default_initialize_params` (`crates/lsp/src/lsp.rs`):
 
-- If no shared workspace-folder set is attached, Zed sends a single folder derived from `root_uri`.
-- If a shared set **exists** but is still empty at init time, Zed sends `workspaceFolders: []` even when `rootUri` is set.
+- No shared workspace-folder set: one folder from `root_uri`.
+- A shared set that is still empty at init: `workspaceFolders: []` even when `rootUri` is set.
 
-Later, Zed may call `set_workspace_folders` / `didChangeWorkspaceFolders`, but `@x18n/lsp` 0.1.1 does not handle folder change notifications.
+Zed may later send `didChangeWorkspaceFolders`. `@x18n/lsp` 0.1.x does not handle that notification.
 
-So this is a **client/server contract mismatch**, not missing wiring in our Rust extension.
+This is a client/server contract mismatch, not missing wiring in the Rust extension. There is no Zed extension API to override `initialize.workspaceFolders`.
 
 ## What this extension does
 
-There is no Zed extension API to override `initialize.workspaceFolders`.
-
-We apply a **small, documented compatibility patch** to `@x18n/lsp`’s `dist/src.mjs` when we start a server we control (extension-managed npm install, or workspace `node_modules` if the patch can be written):
+It patches `@x18n/lsp` `dist/src.mjs` for servers it starts (extension-managed npm install, or the workspace copy when that file is writable):
 
 1. Treat empty `workspaceFolders` like missing folders.
-2. When recovering, prefer **`initializationOptions.worktreeRoot`** (set from Zed `worktree.root_path()`) **before** `rootUri`. Zed may send a misleading `rootUri` (for example `~/.config/zed`) while the edited project lives elsewhere.
+2. When recovering, prefer `initializationOptions.worktreeRoot` (Zed `worktree.root_path()`) before `rootUri`. Zed may send a misleading `rootUri` (for example `~/.config/zed`) while the edited project lives elsewhere.
 
-If **`useLocalServer`** points at a workspace install but the extension **cannot read** `dist/src.mjs` (typical with **pnpm** symlinks under the WASM filesystem), startup **falls back** to the extension-managed copy (patch applied there) instead of failing with a red language server.
+The initialize-block snippets live in `scripts/lsp-patch-blocks/` and are loaded by both `src/lsp_patch.rs` and `scripts/patch-x18n-lsp-for-zed.mjs`.
 
-The same patch is available manually:
+If `useLocalServer` points at a workspace install but `dist/src.mjs` cannot be read (typical with pnpm symlinks under WASI), startup falls back to the extension-managed copy instead of a red language server.
 
-```bash
+Manual patch:
+
+```sh
 node scripts/run-patch-x18n-lsp.mjs path/to/node_modules/@x18n/lsp/dist/src.mjs
 ```
 
-## Upstream fixes (recommended)
+## Upstream
+
+Useful fixes, not opened from this repo:
 
 - **x18n/lsp**: treat `workspaceFolders?.length === 0` like absent folders; optionally handle `workspace/didChangeWorkspaceFolders`.
-- **Zed**: when `pending_workspace_folders` is empty at init, fall back to `root_uri` (same as the `None` branch) instead of sending `[]`.
+- **Zed**: when `pending_workspace_folders` is empty at init, fall back to `root_uri` instead of sending `[]`.
 
-This repo does not open issues on upstream trackers automatically; the above is for maintainers and froQ.
-
-## Config files
-
-An `x18n.config.*` file is **not** required for the language server to start. Projects configured only via `.vscode/settings.json` (e.g. i18n-ally presets migrated/zero-config layouts) are valid once the workspace folder is visible to `@x18n/lsp`.
+An `x18n.config.*` file is not required for the language server to start. Projects configured only via `.vscode/settings.json` (including i18n-ally presets) are valid once the project folder is visible to `@x18n/lsp`.

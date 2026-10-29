@@ -3,7 +3,7 @@ name = "x18n"
 version = "0.1.0"
 schema_version = 1
 authors = ["froQ <https://github.com/0froq>"]
-description = "Official @x18n/lsp language server for i18n keys, diagnostics, hovers, rename, and extract actions in Zed."
+description = "x18n language server for i18n keys, diagnostics, hovers, rename, and extract actions in Zed."
 repository = "https://github.com/0froq/zed-x18n"
 
 [language_servers.x18n]
