@@ -1,0 +1,7 @@
+		const _x18nMapped = params.workspaceFolders?.map((folder) => fileURLToPath(folder.uri));
+		const settings = params.initializationOptions;
+		let folders = _x18nMapped?.length ? _x18nMapped : [];
+		if (folders.length === 0 && typeof settings?.worktreeRoot === "string" && settings.worktreeRoot.trim()) folders = [settings.worktreeRoot];
+		else if (folders.length === 0 && params.rootUri) folders = [fileURLToPath(params.rootUri)];
+		this.folders = folders;
+		this.watchRegistration = params.capabilities.workspace?.didChangeWatchedFiles?.dynamicRegistration === true;
